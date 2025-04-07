@@ -26,7 +26,7 @@ class CausalSelfAttention(nn.Module):
         
         self.n_head = config.n_head
         self.n_embd = config.n_embd
-        self.head_dim = self.n_embd / self.n_head
+        self.head_dim = self.n_embd // self.n_head
         assert self.n_embd % self.n_head == 0, "n_embd must be divisible by n_head"
 
         self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd)
@@ -42,15 +42,18 @@ class CausalSelfAttention(nn.Module):
 
         qkv = self.c_attn(x)
         q, k, v = qkv.split(self.n_embd, dim = 2)
+        reshape_fn = lambda x: x.view(B, T, self.n_head, self.head_dim).transpose(1, 2)     # (B, nh, T, dh)
+        q, k, v = reshape_fn(q), reshape_fn(k), reshape_fn(v)
 
         # calc the attention results
-        att = torch.einsum("BTD,BTD->BTT", q, k) / math.sqrt(self.head_dim)
+        att = torch.einsum("BnTd,BnSd->BnTS", q, k) / math.sqrt(self.head_dim)
         # apply causal mask
         att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
         att = F.softmax(att, dim=-1)
 
         # apply v_proj
-        y = torch.einsum("BTT,BTD->BTD", att, v)
+        y = att @ v
+        y = y.transpose(1, 2).contiguous().view(B, T, D)
         y = self.c_proj(y)
         
         return y
@@ -65,8 +68,8 @@ class Block(nn.Module):
         self.mlp = MLP(config)
 
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
-        x = x + self.mlp(self.ln2(x))
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
         return x
 
 
@@ -133,3 +136,20 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
+    
+
+    def forward(self, idx):
+        B, T = idx.size()
+        assert T <= self.config.max_seq_len, f"sequence length {T} exceed max_seq_len {self.config.max_seq_len}!"
+        
+        pos = torch.arange(0, T, dtype=torch.long, device=idx.device)
+        pos_emb = self.transformer.wpe(pos)
+        tok_emb = self.transformer.wte(idx)
+        x = tok_emb + pos_emb
+        
+        for block in self.transformer.h:
+            x = block(x)
+
+        x = self.transformer.ln_f(x)
+        logits = self.lm_head(x)
+        return logits
