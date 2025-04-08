@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import time
 
 
 class MLP(nn.Module):
@@ -242,50 +243,25 @@ if __name__ == '__main__':
     enc = tiktoken.get_encoding('gpt2')
 
     # dataloader
-    train_loader = DataLoader(B=4, T=32)
+    train_loader = DataLoader(B=16, T=1024)
+
+    # torch.set_float32_matmul_precision('high')
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     for i in range(50):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
 
+        t0 = time.time()
+
         optimizer.zero_grad()
         logits, loss = model(x, y)
         loss.backward()
         optimizer.step()
-        print(f'step {i}, loss: {loss.item()}')
 
-    import sys; sys.exit(0)
-
-    # get the inputs
-    tokens = enc.encode("Hello, I'm a language model,")
-    tokens = torch.tensor(tokens, dtype=torch.long)
-    tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
-    x = tokens.to(device)
-
-    # set seed
-    torch.manual_seed(42)
-    torch.cuda.manual_seed(42)
-
-    # generate
-    while x.size(1) < max_length:
-        with torch.no_grad():
-            logits = model(x)
-            
-            logits = logits[:, -1, :]
-            
-            probs = F.softmax(logits, dim=-1)
-            # do top-k sampling
-            topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
-            # select a token from the top-k probabilities
-            ix = torch.multinomial(topk_probs, 1)
-            # gather the corresponding indices
-            xcol = torch.gather(topk_indices, -1, ix)
-            # append to the sequence
-            x = torch.cat((x, xcol), dim=1)
-
-    # decode the generated tokens
-    for i in range(num_return_sequences):
-        tokens = x[i, :max_length].tolist()
-        decoded = enc.decode(tokens)
-        print(">", decoded)
+        # wait for gpu to finish work
+        torch.cuda.synchronize()
+        t1 = time.time()
+        dt = (t1 - t0)*1000
+        tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
+        print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms, tok/sec: {tokens_per_sec:.2f}")
