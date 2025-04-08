@@ -255,7 +255,8 @@ if __name__ == '__main__':
         t0 = time.time()
 
         optimizer.zero_grad()
-        logits, loss = model(x, y)
+        with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            logits, loss = model(x, y)
         loss.backward()
         optimizer.step()
 
