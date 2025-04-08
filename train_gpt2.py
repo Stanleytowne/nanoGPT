@@ -138,7 +138,7 @@ class GPT(nn.Module):
         return model
     
 
-    def forward(self, idx):
+    def forward(self, idx, targets=None):
         B, T = idx.size()
         assert T <= self.config.max_seq_len, f"sequence length {T} exceed max_seq_len {self.config.max_seq_len}!"
         
@@ -152,7 +152,11 @@ class GPT(nn.Module):
 
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
-        return logits
+
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
     
 
 if __name__ == '__main__':
@@ -176,6 +180,22 @@ if __name__ == '__main__':
     # get the chatgpt tokenizer
     import tiktoken
     enc = tiktoken.get_encoding('gpt2')
+
+    # get the inputs
+    with open('input.txt', 'r') as f:
+        text = f.read()
+    text = text[:1000]
+    tokens = enc.encode(text)
+    B, T = 4, 32
+    buf = torch.tensor(tokens[:B*T + 1])
+    x = buf[:-1].view(B, T).to(device)
+    y = buf[1:].view(B, T).to(device)
+
+    logits, loss = model(x, y)
+    print(loss)
+
+
+    import sys; sys.exit(0)
 
     # get the inputs
     tokens = enc.encode("Hello, I'm a language model,")
