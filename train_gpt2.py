@@ -228,7 +228,7 @@ if __name__ == '__main__':
 
     # get the model
     # model = GPT.from_pretrained('gpt2')
-    model = GPT(GPTConfig())
+    model = GPT(GPTConfig(vocab_size=50304))
     model.eval()
     model.to(device)
     model = torch.compile(model)
