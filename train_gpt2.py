@@ -98,6 +98,8 @@ class GPT(nn.Module):
         ))
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
+        self.transformer.wte.weight = self.lm_head.weight
+
     @classmethod
     def from_pretrained(cls, model_type):
         assert model_type in {'gpt2'}, "currently, only the smallest model is supported"
