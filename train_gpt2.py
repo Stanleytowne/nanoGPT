@@ -12,6 +12,9 @@ class MLP(nn.Module):
         self.act = nn.GELU(approximate='tanh')
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd)
 
+        # for initialization taking account of skip connection
+        self.c_proj.NANOGPT_SCALE_INIT = 1
+
     def forward(self, x):
         x = self.c_fc(x)
         x = self.act(x)
@@ -31,6 +34,9 @@ class CausalSelfAttention(nn.Module):
 
         self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd)
         self.c_proj = nn.Linear(self.n_embd, self.n_embd)
+
+        # for initialization taking account of skip connection
+        self.c_proj.NANOGPT_SCALE_INIT = 1
 
         self.register_buffer(
             "bias", 
@@ -60,6 +66,7 @@ class CausalSelfAttention(nn.Module):
 
 
 class Block(nn.Module):
+
     def __init__(self, config):
         super(Block, self).__init__()
         self.ln_1 = nn.LayerNorm(config.n_embd)
@@ -81,7 +88,8 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     max_seq_len: int = 1024  # max sequence length!!
-    
+
+
 class GPT(nn.Module):
 
     def __init__(self, config: GPTConfig):
@@ -99,6 +107,20 @@ class GPT(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.transformer.wte.weight = self.lm_head.weight
+
+        # initial params in the way gpt does
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            std = 0.02
+            if hasattr(module, "NANOGPT_SCALE_INIT"):
+                std *= (2 * self.config.n_layer) ** -0.5
+            torch.nn.init.normal_(module.weight, std=std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, std=0.02)
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -185,7 +207,7 @@ class DataLoader:
 
     def next_batch(self):
         B, T = self.B, self.T
-        buf = torch.tensor(self.tokens[self.current_pos: self.current_pos + B * T + 1])
+        buf = self.tokens[self.current_pos: self.current_pos + B * T + 1].clone().detach()
         x = buf[:-1].view(B, T)
         y = buf[1:].view(B, T)
 
