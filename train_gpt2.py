@@ -214,7 +214,7 @@ class DataLoader:
 
         self.current_pos += B * T
 
-        if self.current_pos + (B + T + 1) > len(self.tokens):
+        if self.current_pos + (B * T + 1) > len(self.tokens):
             self.current_pos = 0
 
         return x, y
@@ -237,6 +237,7 @@ if __name__ == '__main__':
     model = GPT(GPTConfig())
     model.eval()
     model.to(device)
+    model = torch.compile(model)
 
     # get the chatgpt tokenizer
     import tiktoken
