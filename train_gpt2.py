@@ -52,14 +52,8 @@ class CausalSelfAttention(nn.Module):
         reshape_fn = lambda x: x.view(B, T, self.n_head, self.head_dim).transpose(1, 2)     # (B, nh, T, dh)
         q, k, v = reshape_fn(q), reshape_fn(k), reshape_fn(v)
 
-        # calc the attention results
-        att = torch.einsum("BnTd,BnSd->BnTS", q, k) / math.sqrt(self.head_dim)
-        # apply causal mask
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
-
-        # apply v_proj
-        y = att @ v
+        # using flash attention
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, D)
         y = self.c_proj(y)
         
