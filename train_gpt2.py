@@ -245,7 +245,7 @@ if __name__ == '__main__':
     # dataloader
     train_loader = DataLoader(B=16, T=1024)
 
-    # torch.set_float32_matmul_precision('high')
+    torch.set_float32_matmul_precision('high')
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     for i in range(50):
