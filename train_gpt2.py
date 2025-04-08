@@ -161,6 +161,42 @@ class GPT(nn.Module):
         return logits, loss
     
 
+# --------------------
+# DataLoader
+import tiktoken
+
+class DataLoader:
+
+    def __init__(self, B, T, input_dir='input.txt'):
+        self.B = B
+        self.T = T
+
+        with open(input_dir, 'r') as f:
+            text = f.read()
+
+        enc = tiktoken.get_encoding('gpt2')
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+
+        print(f"loaded {len(self.tokens)} tokens from {input_dir}")
+        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+
+        self.current_pos = 0
+
+    def next_batch(self):
+        B, T = self.B, self.T
+        buf = torch.tensor(self.tokens[self.current_pos: self.current_pos + B * T + 1])
+        x = buf[:-1].view(B, T)
+        y = buf[1:].view(B, T)
+
+        self.current_pos += B * T
+
+        if self.current_pos + (B + T + 1) > len(self.tokens):
+            self.current_pos = 0
+
+        return x, y
+
+
 if __name__ == '__main__':
     # autodetect the device
     device = 'cpu'
@@ -183,21 +219,14 @@ if __name__ == '__main__':
     import tiktoken
     enc = tiktoken.get_encoding('gpt2')
 
-    # get the inputs
-    with open('input.txt', 'r') as f:
-        text = f.read()
-    text = text[:1000]
-    tokens = enc.encode(text)
-    B, T = 4, 32
-    buf = torch.tensor(tokens[:B*T + 1]).to(device)
-    x = buf[:-1].view(B, T)
-    y = buf[1:].view(B, T)
-
-    # logits, loss = model(x, y)
-    # print(loss)
+    # dataloader
+    train_loader = DataLoader(B=4, T=32)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
     for i in range(50):
+        x, y = train_loader.next_batch()
+        x, y = x.to(device), y.to(device)
+
         optimizer.zero_grad()
         logits, loss = model(x, y)
         loss.backward()
