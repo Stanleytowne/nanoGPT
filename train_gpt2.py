@@ -242,7 +242,7 @@ if __name__ == '__main__':
 
     torch.set_float32_matmul_precision('high')
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=[0.9, 0.95], eps=1e-8)
     for i in range(50):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
@@ -253,6 +253,7 @@ if __name__ == '__main__':
         with torch.autocast(device_type=device, dtype=torch.bfloat16):
             logits, loss = model(x, y)
         loss.backward()
+        norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)      # clip the gradient
         optimizer.step()
 
         # wait for gpu to finish work
@@ -264,4 +265,4 @@ if __name__ == '__main__':
         dt = t1 - t0 # time difference in seconds
         tokens_processed = train_loader.B * train_loader.T
         tokens_per_sec = tokens_processed / dt
-        print(f"step {i:4d} | loss: {loss.item():.6f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f}")
+        print(f"step {i:4d} | loss: {loss.item():.6f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f} | norm: {norm:.2f}")   # print the norm of the gradient
