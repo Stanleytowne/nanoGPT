@@ -233,6 +233,25 @@ if __name__ == '__main__':
     model.to(device)
     model = torch.compile(model)
 
+    # lr scheduler
+    max_lr = 6e-4
+    min_lr = max_lr * 0.1
+    warmup_steps = 10
+    max_steps = 50
+    def get_lr(it):
+        # linear warmup
+        if it < warmup_steps:
+            return max_lr * (it+1) / warmup_steps
+        
+        # if it > max_steps, return min learning rate
+        if it > max_steps:
+            return min_lr
+        
+        # in between, use cosine decay down
+        decay_ratio = (it - warmup_steps) / (max_steps - warmup_steps)
+        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+        return min_lr + coeff * (max_lr - min_lr)
+
     # get the chatgpt tokenizer
     import tiktoken
     enc = tiktoken.get_encoding('gpt2')
@@ -243,7 +262,7 @@ if __name__ == '__main__':
     torch.set_float32_matmul_precision('high')
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=[0.9, 0.95], eps=1e-8)
-    for i in range(50):
+    for i in range(max_steps):
         x, y = train_loader.next_batch()
         x, y = x.to(device), y.to(device)
 
@@ -254,6 +273,12 @@ if __name__ == '__main__':
             logits, loss = model(x, y)
         loss.backward()
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)      # clip the gradient
+
+        # determine the learning rate
+        lr = get_lr(i)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+        # and finally update the parameters
         optimizer.step()
 
         # wait for gpu to finish work
@@ -265,4 +290,4 @@ if __name__ == '__main__':
         dt = t1 - t0 # time difference in seconds
         tokens_processed = train_loader.B * train_loader.T
         tokens_per_sec = tokens_processed / dt
-        print(f"step {i:4d} | loss: {loss.item():.6f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f} | norm: {norm:.2f}")   # print the norm of the gradient
+        print(f"step {i:4d} | loss: {loss.item():.6f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f} | norm: {norm:.2f} | lr: {lr:.6f}")   # print the norm of the gradient
