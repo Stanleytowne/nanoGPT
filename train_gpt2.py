@@ -223,7 +223,7 @@ class DataLoader:
         self.tokens = torch.tensor(tokens)
 
         print(f"loaded {len(self.tokens)} tokens from {input_dir}")
-        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+        print(f"1 epoch = {len(self.tokens) // (B * T)} micro batches")
 
         self.current_pos = 0
 
@@ -284,22 +284,35 @@ if __name__ == '__main__':
     enc = tiktoken.get_encoding('gpt2')
 
     # dataloader
-    train_loader = DataLoader(B=16, T=1024)
+    total_batch_size = 524288   # 0.5M tokens
+    B = 16                      # micro batch size
+    T = 1024                    # sequence length
+    assert total_batch_size % (B * T) == 0, "make sure total_batch_size is divisible by B * T"
+    grad_accum_steps = total_batch_size // (B * T)
+    print(f"total desired batch size: {total_batch_size}")
+    print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
+
+    train_loader = DataLoader(B=B, T=T)
 
     torch.set_float32_matmul_precision('high')
 
     optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
-    
+
     for i in range(max_steps):
-        x, y = train_loader.next_batch()
-        x, y = x.to(device), y.to(device)
-
         t0 = time.time()
-
         optimizer.zero_grad()
-        with torch.autocast(device_type=device, dtype=torch.bfloat16):
-            logits, loss = model(x, y)
-        loss.backward()
+
+        loss_total = 0.0
+        for micro_step in range(grad_accum_steps):
+            x, y = train_loader.next_batch()
+            x, y = x.to(device), y.to(device)
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                logits, loss = model(x, y)
+            # scale the loss so that the gradients add up correctly
+            loss = loss / grad_accum_steps
+            loss_total += loss.detach()
+            loss.backward()
+
         norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)      # clip the gradient
 
         # determine the learning rate
@@ -316,6 +329,6 @@ if __name__ == '__main__':
         # tokens_per_sec = (train_loader.B * train_loader.T) / (t1 - t0)
         # print(f"step {i}, loss: {loss.item()}, dt: {dt:.2f}ms, tok/sec: {tokens_per_sec:.2f}")
         dt = t1 - t0 # time difference in seconds
-        tokens_processed = train_loader.B * train_loader.T
+        tokens_processed = total_batch_size
         tokens_per_sec = tokens_processed / dt
-        print(f"step {i:4d} | loss: {loss.item():.6f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f} | norm: {norm:.2f} | lr: {lr:.6f}")   # print the norm of the gradient
+        print(f"step {i:4d} | loss: {loss_total.item():.6f} | dt: {dt*1000:.2f}ms | tok/sec: {tokens_per_sec:.2f} | norm: {norm:.2f} | lr: {lr:.6f}")   # print the norm of the gradient
